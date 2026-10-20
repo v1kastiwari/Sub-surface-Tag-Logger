@@ -1,0 +1,639 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Subsurface Tag Logger</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  /* Layout: left column is a cross-section of the buried node; right column holds burial settings, run controls and live counters. Tag memory map and the decoded plots stack underneath. */
+  --bg:#EBEFED; --surface:#F7F9F8; --fg:#13201D; --muted:#586763; --line:#C9D3CF;
+  --accent:#0D7A72; --accent-fg:#FFFFFF; --tag:#D69508; --bad:#C23B2B; --ok:#1B8650;
+  --sky:#DCE7EA; --s1:#C9AE86; --s2:#AD8F6C; --s3:#8D918D; --soilfg:#2A2116; --bore:#1D2624;
+  --pcb:#2D6F57; --pcbfg:#E8F5EE; --cell:#DCE4E1; --cellres:#B9C5C0;
+  --c-temp:#C4501F; --c-hum:#2B6CB0; --c-vwc:#17835E;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0C1312; --surface:#131C1A; --fg:#E3ECE9; --muted:#8E9F9A; --line:#2A3835;
+    --accent:#3CC2B6; --accent-fg:#04201D; --tag:#F2B53C; --bad:#FF7F6E; --ok:#4CCB8A;
+    --sky:#12202A; --s1:#6A5A44; --s2:#584A3A; --s3:#343A38; --soilfg:#E2D6C4; --bore:#070B0A;
+    --pcb:#1F5242; --pcbfg:#E8F5EE; --cell:#202C2A; --cellres:#2E3B38;
+    --c-temp:#FF8E60; --c-hum:#6FAAF2; --c-vwc:#4FD3A3;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0C1312; --surface:#131C1A; --fg:#E3ECE9; --muted:#8E9F9A; --line:#2A3835;
+  --accent:#3CC2B6; --accent-fg:#04201D; --tag:#F2B53C; --bad:#FF7F6E; --ok:#4CCB8A;
+  --sky:#12202A; --s1:#6A5A44; --s2:#584A3A; --s3:#343A38; --soilfg:#E2D6C4; --bore:#070B0A;
+  --pcb:#1F5242; --pcbfg:#E8F5EE; --cell:#202C2A; --cellres:#2E3B38;
+  --c-temp:#FF8E60; --c-hum:#6FAAF2; --c-vwc:#4FD3A3;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--fg); font-family:var(--font-body); font-size:14px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:28px 56px;
+}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-direction:column;gap:6px;max-width:68ch}
+.eyebrow{margin:0;font:500 11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{margin:0;font-size:clamp(26px,4.4vw,38px);line-height:1.1;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.lede{margin:0;color:var(--muted);font-size:15px;max-width:62ch}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:16px;min-width:0}
+.stage{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:20px;align-items:start}
+.side{display:flex;flex-direction:column;gap:20px;min-width:0}
+@media (max-width:820px){.stage{grid-template-columns:minmax(0,1fr)}}
+
+/* cross-section */
+.diagram{display:flex;flex-direction:column;gap:10px;padding:0;overflow:hidden}
+.diagram svg{display:block;width:100%;height:auto}
+.diagram .caption{padding:0 16px 14px;display:flex;flex-direction:column;gap:2px}
+.phase{font-weight:600}
+.sub{color:var(--muted);font-size:13px}
+.sky{fill:var(--sky)} .s1{fill:var(--s1)} .s2{fill:var(--s2)} .s3{fill:var(--s3)}
+.surf{stroke:var(--soilfg);stroke-width:1.5}
+.rl{stroke:var(--soilfg);stroke-width:1} .rt{fill:var(--soilfg);font:8px var(--font-mono)}
+.bore{fill:var(--bore)}
+.pcb{fill:var(--pcb)} .pcbt{fill:var(--pcbfg);font:8px var(--font-mono)}
+.tagrect{fill:var(--tag);stroke:var(--bore);stroke-width:1}
+.tagt{fill:var(--bore);font:600 7px var(--font-mono)}
+.thread{stroke:var(--tag);stroke-width:1.5;stroke-dasharray:3 2}
+.probe{stroke:var(--muted);stroke-width:2}
+.pdot{fill:var(--c-vwc);stroke:var(--bore);stroke-width:1}
+.plabel{fill:var(--soilfg);font:8px var(--font-mono)}
+.ant{fill:var(--accent);opacity:.35}
+.pulse .ant{animation:flash .45s ease-out}
+@keyframes flash{0%{opacity:1}100%{opacity:.35}}
+.rdr{fill:var(--bore);stroke:var(--accent);stroke-width:1.5}
+.rt1{fill:var(--accent);font:600 8px var(--font-mono);letter-spacing:.06em}
+.rt2{fill:var(--pcbfg);font:8px var(--font-mono)}
+@media (prefers-reduced-motion: reduce){.pulse .ant{animation:none;opacity:1}}
+
+/* controls */
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-top:12px}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field label{font:500 11px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+.field output{color:var(--fg)}
+select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:8px 10px;width:100%}
+input[type=range]{width:100%;accent-color:var(--accent);margin:6px 0}
+.hint{margin:12px 0 0;color:var(--muted);font-size:13px}
+.btnrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.btn{font:500 14px var(--font-body);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:9px 14px;cursor:pointer}
+.btn:hover:not(:disabled){border-color:var(--muted)}
+.btn[aria-pressed="true"]{border-color:var(--bad);color:var(--bad)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+:is(.btn,select,input):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg button{font:500 13px var(--font-body);color:var(--muted);background:var(--bg);border:0;padding:8px 12px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.runhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.speed{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.speed span{font:500 11px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+dl.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 16px;margin:16px 0 0}
+dl.stats div{display:flex;flex-direction:column;gap:2px;min-width:0}
+dl.stats dt{font:500 11px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+dl.stats dd{margin:0;font:500 15px var(--font-mono);font-variant-numeric:tabular-nums}
+.bar{height:6px;background:var(--cell);border-radius:3px;overflow:hidden;margin-top:14px}
+.bar i{display:block;height:100%;width:0;background:var(--accent)}
+.note{margin:12px 0 0;color:var(--muted);font-size:13px}
+
+/* memory */
+.memhead{display:flex;flex-direction:column;gap:2px;margin-bottom:14px}
+.memgrid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:24px}
+@media (max-width:860px){.memgrid{grid-template-columns:minmax(0,1fr)}}
+.map{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px 20px}
+.half{display:grid;grid-template-columns:30px repeat(4,minmax(0,1fr));gap:3px;align-items:center}
+.half .sl{font:500 10px var(--font-mono);color:var(--muted)}
+.half .bh{font:500 10px var(--font-mono);color:var(--muted);text-align:center}
+.blk{height:22px;display:grid;grid-template-columns:1fr 1fr;gap:1px;border-radius:2px;overflow:hidden;background:var(--surface)}
+.blk i{background:var(--cell)}
+.blk.on i{background:var(--accent)}
+.blk.bad i:last-child{background:var(--bad)}
+.blk.mfr i,.blk.trl i{background:repeating-linear-gradient(135deg,var(--cellres) 0 3px,var(--cell) 3px 6px)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:12px;height:12px;border-radius:2px;display:inline-block}
+.sw-empty{background:var(--cell)} .sw-on{background:var(--accent)} .sw-bad{background:var(--bad)}
+.sw-res{background:repeating-linear-gradient(135deg,var(--cellres) 0 3px,var(--cell) 3px 6px)}
+.fmt{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.chip{font:500 12px var(--font-mono);padding:3px 8px;border:1px solid var(--line);border-radius:3px;white-space:nowrap}
+.hexhead{margin:0 0 8px;font-weight:600}
+.hexhead span{font-weight:400;color:var(--muted);font-size:13px}
+.hexrow{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
+.hexrow code{font:500 15px var(--font-mono);white-space:normal;overflow-wrap:anywhere}
+.dec{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.fs{color:var(--muted)} .ft,.ch-t{color:var(--c-temp)} .fh,.ch-h{color:var(--c-hum)} .fv,.ch-v{color:var(--c-vwc)} .fc,.ch-c{color:var(--muted);opacity:.75} .ch-s{color:var(--muted)}
+
+/* readout */
+.rohead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.empty{margin:14px 0 4px;color:var(--muted);max-width:60ch}
+#charts{width:100%;min-width:0;margin-top:14px}
+#charts svg{display:block}
+.grid{stroke:var(--line);stroke-width:1} .base{stroke:var(--muted);stroke-width:1}
+.tick{fill:var(--muted);font:11px var(--font-mono)} .axt{fill:var(--muted);font:11px var(--font-body)}
+.ptitle{font:600 12px var(--font-body)} .unit{font-weight:400;fill:var(--muted)}
+.ptitle.temp{fill:var(--c-temp)} .ptitle.hum{fill:var(--c-hum)} .ptitle.vwc{fill:var(--c-vwc)}
+.line{fill:none;stroke-width:1.8;stroke-linejoin:round}
+.line.temp{stroke:var(--c-temp)} .line.hum{stroke:var(--c-hum)} .line.vwc{stroke:var(--c-vwc)}
+.area{opacity:.12} .area.temp,.dot.temp,.end.temp{fill:var(--c-temp)} .area.hum,.dot.hum,.end.hum{fill:var(--c-hum)} .area.vwc,.dot.vwc,.end.vwc{fill:var(--c-vwc)}
+.end{stroke:var(--surface);stroke-width:2}
+.badline{stroke:var(--bad);stroke-width:1.2;stroke-dasharray:3 3}
+.tablewrap{overflow-x:auto;max-height:280px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;margin-top:10px}
+table{border-collapse:collapse;width:100%;font:12px var(--font-mono);font-variant-numeric:tabular-nums}
+th,td{padding:5px 10px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--line)}
+th{position:sticky;top:0;background:var(--surface);color:var(--muted);font-weight:500}
+tr.bad td{color:var(--bad)}
+details{margin-top:16px} summary{cursor:pointer;font-weight:500}
+summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<main class="wrap">
+  <header>
+    <p class="eyebrow">Simulation · every number here is generated, nothing is measured</p>
+    <h1>Subsurface Tag Logger</h1>
+    <p class="lede">A buried node reads temperature, humidity and soil moisture, packs each sample into 8 bytes and writes it to a MIFARE 1K tag. Pull the tag up its thread, then decode and plot what it holds.</p>
+  </header>
+
+  <section class="stage">
+    <div class="panel diagram">
+      <svg id="diagram" viewBox="0 0 340 400" role="img" aria-label="Cross-section of a borehole with a sensor node at the bottom, a tag on a thread, and a reader at the surface">
+        <rect class="sky" x="0" y="0" width="340" height="70"/>
+        <rect class="s1" x="0" y="70" width="340" height="60"/>
+        <rect class="s2" x="0" y="130" width="340" height="130"/>
+        <rect class="s3" x="0" y="260" width="340" height="140"/>
+        <line class="surf" x1="0" y1="70" x2="340" y2="70"/>
+        <text class="rt" x="334" y="83" text-anchor="end">ground level</text>
+        <g id="ruler"></g>
+        <rect id="bore" class="bore" x="172" y="70" width="22" height="100"/>
+        <line id="thread" class="thread" x1="183" y1="100" x2="183" y2="14"/>
+        <g id="nodeg">
+          <rect class="bore" x="140" y="-40" width="66" height="48"/>
+          <line class="probe" x1="140" y1="-14" x2="108" y2="-14"/>
+          <circle class="pdot" cx="106" cy="-14" r="4"/>
+          <text class="plabel" x="44" y="-18">moisture probe</text>
+          <rect class="pcb" x="144" y="-34" width="52" height="34" rx="2"/>
+          <text class="pcbt" x="148" y="-24">MCU</text>
+          <text class="pcbt" x="148" y="-15">SHT31</text>
+          <text class="pcbt" x="148" y="-6">RC522</text>
+          <rect class="ant" x="174" y="-6" width="18" height="3"/>
+          <g id="tagg" transform="translate(0 0)">
+            <rect class="tagrect" x="176" y="-30" width="14" height="22" rx="2"/>
+            <text class="tagt" x="183" y="-16" text-anchor="middle">TAG</text>
+          </g>
+        </g>
+        <g>
+          <rect class="rdr" x="212" y="26" width="100" height="38" rx="3"/>
+          <text class="rt1" x="220" y="41">READER</text>
+          <text id="rdTxt" class="rt2" x="220" y="55">idle</text>
+        </g>
+      </svg>
+      <div class="caption">
+        <span class="phase" id="phase" aria-live="polite">Logging</span>
+        <span class="sub" id="where">Moist clay at 3.0 m</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>Burial conditions</h2>
+        <div class="fields">
+          <div class="field">
+            <label for="soil">Ground</label>
+            <select id="soil">
+              <option value="dry">Dry sand</option>
+              <option value="moist" selected>Moist clay</option>
+              <option value="wet">Waterlogged clay</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="depth">Depth <output id="depthOut" for="depth">3.0 m</output></label>
+            <input id="depth" type="range" min="0.5" max="10" step="0.5" value="3">
+          </div>
+          <div class="field">
+            <label for="interval">Sample every</label>
+            <select id="interval">
+              <option value="0.25">15 minutes</option>
+              <option value="1" selected>1 hour</option>
+              <option value="3">3 hours</option>
+              <option value="6">6 hours</option>
+            </select>
+          </div>
+        </div>
+        <p class="hint">Changing any of these buries a fresh node and starts the log again.</p>
+      </div>
+
+      <div class="panel">
+        <div class="runhead"><h2>Logger</h2><span class="sub" id="elapsed">0 min underground</span></div>
+        <div class="btnrow">
+          <button class="btn" id="run" type="button">Pause</button>
+          <button class="btn" id="snag" type="button" aria-pressed="false">Tug the thread mid-write</button>
+          <button class="btn primary" id="pull" type="button">Pull the tag</button>
+        </div>
+        <div class="speed">
+          <span>Sim speed</span>
+          <div class="seg" role="group" aria-label="Simulation speed">
+            <button type="button" data-rate="slow" aria-pressed="false">Slow</button>
+            <button type="button" data-rate="normal" aria-pressed="true">Normal</button>
+            <button type="button" data-rate="fast" aria-pressed="false">Fast</button>
+          </div>
+        </div>
+        <div class="bar" aria-hidden="true"><i id="fill"></i></div>
+        <dl class="stats">
+          <div><dt>Samples taken</dt><dd id="stSamples">0 / 94</dd></div>
+          <div><dt>Records on tag</dt><dd id="stTag">0</dd></div>
+          <div><dt>Waiting in MCU RAM</dt><dd id="stRam">0</dd></div>
+          <div><dt>Tag block writes</dt><dd id="stWrites">0</dd></div>
+        </dl>
+        <p class="note" id="capnote">The tag holds 94 eight-byte records, full after 3 d 22 h at this rate. A 32 KB I²C EEPROM holds 4,096 of them.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="memhead">
+      <h2>Tag memory · MIFARE Classic 1K</h2>
+      <span class="sub">64 blocks of 16 bytes, shown by sector. 47 hold data. Block 0 and the 16 sector trailers are reserved. Each data block holds two records, so the MCU writes a block after every second sample.</span>
+    </div>
+    <div class="memgrid">
+      <div>
+        <div class="map" id="map" role="img" aria-label="Map of the 64 memory blocks on the tag"></div>
+        <div class="legend">
+          <span><i class="sw-empty"></i>empty</span>
+          <span><i class="sw-on"></i>written</span>
+          <span><i class="sw-bad"></i>write cut off</span>
+          <span><i class="sw-res"></i>reserved</span>
+        </div>
+      </div>
+      <div>
+        <div class="fmt" aria-label="Record layout">
+          <span class="chip ch-s">sample no. 2 B</span>
+          <span class="chip ch-t">temp 2 B</span>
+          <span class="chip ch-h">RH 2 B</span>
+          <span class="chip ch-v">moisture 1 B</span>
+          <span class="chip ch-c">XOR check 1 B</span>
+        </div>
+        <div id="hexview"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="readout">
+    <div class="rohead"><h2>Surface readout</h2></div>
+    <div id="readoutBody"></div>
+  </section>
+</main>
+
+<script>
+(function(){
+'use strict';
+var CAP=94;
+var dataBlocks=[];
+for(var s0=0;s0<16;s0++){for(var b0=0;b0<3;b0++){if(s0===0&&b0===0)continue;dataBlocks.push(s0*4+b0);}}
+var SC={
+  dry:{name:'Dry sand',vwc:7,rh:62,rain:6},
+  moist:{name:'Moist clay',vwc:28,rh:90,rain:9},
+  wet:{name:'Waterlogged clay',vwc:42,rh:99,rain:3}
+};
+var RATE={slow:2,normal:6,fast:20};
+var P={soil:'moist',depth:3,interval:1,rate:'normal'};
+var $=function(id){return document.getElementById(id);};
+var reduce=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+var S=null,timer=null,R={data:null},nodeY=0,cells=[];
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(){var u=1-S.rng(),v=S.rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function hex2(n){return n.toString(16).padStart(2,'0').toUpperCase();}
+function xor7(b){var x=0;for(var i=0;i<7;i++)x^=b[i];return x;}
+function fmtDur(h){
+  var m=Math.round(h*60),d=Math.floor(m/1440),hh=Math.floor((m%1440)/60),mm=m%60,p=[];
+  if(d)p.push(d+' d');if(hh)p.push(hh+' h');if(mm)p.push(mm+' min');
+  return p.length?p.slice(0,2).join(' '):'0 min';
+}
+
+function fresh(){
+  S={seq:0,buf:[],flushes:0,tag:new Uint8Array(1024),phase:'logging',snag:false,bad:new Set(),
+     rng:mulberry32(11),interval:P.interval,soil:P.soil,depth:P.depth,writes:new Array(64).fill(0),lastBlock:-1};
+}
+
+function model(t){
+  var sc=SC[S.soil],z=S.depth;
+  var T=27+6*Math.exp(-z/0.3)*Math.sin(2*Math.PI*(t-9)/24)+2.5*Math.exp(-z/1.2)*Math.sin(2*Math.PI*t/96)+gauss()*0.04;
+  var span=CAP*S.interval,center=span*(0.38+0.012*z),sig=span*0.07;
+  var rain=sc.rain*Math.exp(-z/4)*Math.exp(-0.5*Math.pow((t-center)/sig,2));
+  var V=Math.max(0,Math.min(100,sc.vwc+rain+gauss()*0.3));
+  var RH=Math.max(0,Math.min(100,sc.rh+0.25*(V-sc.vwc)+gauss()*0.4));
+  return {T:T,RH:RH,V:V};
+}
+function pack(seq,m){
+  var b=new Uint8Array(8),dv=new DataView(b.buffer);
+  dv.setUint16(0,seq);dv.setInt16(2,Math.round(m.T*100));dv.setUint16(4,Math.round(m.RH*100));
+  b[6]=Math.round(m.V*2);b[7]=xor7(b);
+  return b;
+}
+function decode(b,expectSeq){
+  var empty=true;for(var i=0;i<8;i++)if(b[i]!==0)empty=false;
+  if(empty)return {empty:true,ok:false};
+  var dv=new DataView(b.buffer,b.byteOffset,8),seq=dv.getUint16(0);
+  return {empty:false,seq:seq,T:dv.getInt16(2)/100,RH:dv.getUint16(4)/100,V:b[6]/2,ok:(xor7(b)===b[7]&&seq===expectSeq)};
+}
+function recHex(b){
+  var h=Array.prototype.map.call(b,hex2);
+  return '<span class="fs">'+h[0]+h[1]+'</span> <span class="ft">'+h[2]+h[3]+'</span> <span class="fh">'+h[4]+h[5]+'</span> <span class="fv">'+h[6]+'</span> <span class="fc">'+h[7]+'</span>';
+}
+
+function takeSample(silent){
+  if(S.seq>=CAP)return;
+  var seq=++S.seq,m=model(seq*S.interval);
+  S.buf.push(pack(seq,m));
+  if(S.buf.length===2)flush(silent);
+}
+function flush(silent){
+  var bi=S.flushes,abs=dataBlocks[bi],off=abs*16,r0=S.buf[0],r1=S.buf[1];
+  S.tag.set(r0,off);
+  if(S.snag){
+    S.tag.set(r1.subarray(0,5),off+8);
+    S.bad.add(abs);S.snag=false;
+  }else{
+    S.tag.set(r1,off+8);
+  }
+  S.buf=[];S.writes[abs]++;S.flushes++;S.lastBlock=abs;
+  refreshCell(abs);
+  if(!silent){lastHex();pulse();}
+}
+var pulseT=null;
+function pulse(){
+  var svg=$('diagram');svg.classList.remove('pulse');void svg.getBoundingClientRect();svg.classList.add('pulse');
+  clearTimeout(pulseT);pulseT=setTimeout(function(){svg.classList.remove('pulse');},450);
+}
+
+/* ---- diagram ---- */
+function buildRuler(){
+  var g=$('ruler'),h='';
+  for(var m=0;m<=10;m+=2){
+    var y=70+m*31;
+    h+='<line class="rl" x1="0" x2="8" y1="'+y+'" y2="'+y+'"/>';
+    if(m>0)h+='<text class="rt" x="11" y="'+(y+3)+'">'+m+' m</text>';
+  }
+  g.innerHTML=h;
+}
+function layout(){
+  nodeY=70+S.depth*31;
+  $('nodeg').setAttribute('transform','translate(0 '+nodeY+')');
+  var bore=$('bore');bore.setAttribute('height',String(nodeY+8-70));
+  setTagRel(0);
+}
+function setTagRel(d){
+  $('tagg').setAttribute('transform','translate(0 '+d+')');
+  $('thread').setAttribute('y1',String(nodeY-30+d));
+}
+
+/* ---- memory map ---- */
+function buildMap(){
+  var host=$('map'),html='';
+  cells=[];
+  for(var half=0;half<2;half++){
+    html+='<div class="half"><span></span><span class="bh">B0</span><span class="bh">B1</span><span class="bh">B2</span><span class="bh">B3</span>';
+    for(var s=half*8;s<half*8+8;s++){
+      html+='<span class="sl">S'+s+'</span>';
+      for(var b=0;b<4;b++)html+='<div class="blk" data-i="'+(s*4+b)+'"><i></i><i></i></div>';
+    }
+    html+='</div>';
+  }
+  host.innerHTML=html;
+  var els=host.querySelectorAll('.blk');
+  for(var i=0;i<els.length;i++)cells[+els[i].getAttribute('data-i')]=els[i];
+  for(var k=0;k<64;k++)refreshCell(k);
+}
+function refreshCell(i){
+  var el=cells[i];if(!el)return;
+  var cls='blk',title='Sector '+(i>>2)+', block '+(i&3);
+  if(i===0){cls+=' mfr';title+=': manufacturer data';}
+  else if(i%4===3){cls+=' trl';title+=': sector trailer (keys)';}
+  else if(S.bad.has(i)){cls+=' on bad';title+=': second record cut off';}
+  else if(S.writes[i]>0){cls+=' on';title+=': written';}
+  else title+=': empty';
+  el.className=cls;el.setAttribute('title',title);
+}
+function lastHex(){
+  var el=$('hexview');
+  if(S.lastBlock<0){el.innerHTML='<p class="sub">Nothing written yet.</p>';return;}
+  var i=S.lastBlock,off=i*16,html='<p class="hexhead">Latest write: block '+i+' <span>sector '+(i>>2)+', block '+(i&3)+' · written '+S.writes[i]+'×</span></p>';
+  for(var k=0;k<2;k++){
+    var b=S.tag.subarray(off+k*8,off+k*8+8),d=decode(b,(S.flushes-1)*2+k+1);
+    html+='<div class="hexrow"><code>'+recHex(b)+'</code><span class="dec">'+(d.ok?('#'+d.seq+' · '+d.T.toFixed(2)+' °C · '+d.RH.toFixed(1)+' %RH · '+d.V.toFixed(1)+' % moisture'):'check byte fails, record unreadable')+'</span></div>';
+  }
+  el.innerHTML=html;
+}
+
+/* ---- UI state ---- */
+var PHASE={logging:'Logging',paused:'Paused',full:'Tag full, logging stopped',pulling:'Pulling the tag up the thread',readout:'Tag at the surface, read complete'};
+function updateUI(){
+  var ph=S.phase;
+  $('phase').textContent=PHASE[ph];
+  $('where').textContent=SC[S.soil].name+' at '+S.depth.toFixed(1)+' m';
+  $('stSamples').textContent=S.seq+' / '+CAP;
+  $('stTag').textContent=String(S.flushes*2);
+  $('stRam').textContent=String(S.buf.length);
+  $('stWrites').textContent=String(S.flushes);
+  $('elapsed').textContent=fmtDur(S.seq*S.interval)+' underground';
+  $('fill').style.width=(S.flushes*2/CAP*100)+'%';
+  $('capnote').textContent='The tag holds '+CAP+' eight-byte records, full after '+fmtDur(CAP*S.interval)+' at this rate. A 32 KB I²C EEPROM holds 4,096 of them.';
+  var run=$('run'),live=(ph==='logging'||ph==='paused');
+  run.textContent=ph==='paused'?'Resume':'Pause';
+  run.disabled=!live;
+  var sn=$('snag');sn.disabled=!live;sn.setAttribute('aria-pressed',S.snag?'true':'false');
+  sn.textContent=S.snag?'Thread tugged: next write fails':'Tug the thread mid-write';
+  $('pull').disabled=(ph==='pulling'||ph==='readout');
+  var btns=document.querySelectorAll('[data-rate]');
+  for(var i=0;i<btns.length;i++)btns[i].setAttribute('aria-pressed',btns[i].getAttribute('data-rate')===P.rate?'true':'false');
+}
+function stop(){if(timer){clearInterval(timer);timer=null;}}
+function start(){
+  stop();
+  if(S.phase!=='logging')return;
+  timer=setInterval(tick,1000/RATE[P.rate]);
+}
+function tick(){
+  takeSample(false);
+  if(S.seq>=CAP){S.phase='full';stop();}
+  updateUI();
+}
+function reset(){
+  stop();fresh();R.data=null;
+  layout();$('rdTxt').textContent='idle';
+  buildMap();
+  for(var i=0;i<25;i++)takeSample(true);
+  lastHex();renderEmpty();updateUI();start();
+}
+
+/* ---- pulling the tag ---- */
+function pull(){
+  if(S.phase==='pulling'||S.phase==='readout')return;
+  stop();S.phase='pulling';updateUI();
+  $('rdTxt').textContent='tag arriving';
+  var end=38-(nodeY-30),dur=reduce?0:1900,t0=performance.now();
+  function step(now){
+    var p=dur?Math.min(1,(now-t0)/dur):1;
+    var e=p<0.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;
+    setTagRel(end*e);
+    if(p<1)requestAnimationFrame(step);else arrived();
+  }
+  requestAnimationFrame(step);
+}
+function arrived(){
+  S.phase='readout';
+  $('rdTxt').textContent=S.flushes+' blocks read';
+  pulse();buildReadout();updateUI();
+  $('readout').scrollIntoView({behavior:reduce?'auto':'smooth',block:'start'});
+}
+
+/* ---- readout ---- */
+function renderEmpty(){
+  $('readoutBody').innerHTML='<p class="empty">The tag is still in the ground. Pull it to read its '+dataBlocks.length+' data blocks, check every record and plot the result.</p>';
+}
+function buildReadout(){
+  var rows=[],n=S.flushes*2;
+  for(var r=0;r<n;r++){
+    var off=dataBlocks[r>>1]*16+(r&1)*8,b=S.tag.subarray(off,off+8),d=decode(b,r+1);
+    d.r=r;d.hex=Array.prototype.map.call(b,hex2).join(' ');d.t=(r+1)*S.interval;
+    rows.push(d);
+  }
+  var valid=rows.filter(function(x){return x.ok;}),bad=rows.filter(function(x){return !x.ok&&!x.empty;});
+  R.data={rows:rows,valid:valid,bad:bad};
+  var tmin=Infinity,tmax=-Infinity;
+  valid.forEach(function(x){tmin=Math.min(tmin,x.T);tmax=Math.max(tmax,x.T);});
+  var h='<p class="sub">The tag has no clock. Time on the x axis is sample number × '+fmtDur(S.interval)+', which only works because the interval is fixed in firmware.</p>';
+  h+='<dl class="stats">'
+    +'<div><dt>Records read</dt><dd>'+n+'</dd></div>'
+    +'<div><dt>Passed check</dt><dd>'+valid.length+'</dd></div>'
+    +'<div><dt>Failed check</dt><dd>'+bad.length+'</dd></div>'
+    +'<div><dt>Lost in MCU RAM</dt><dd>'+S.buf.length+'</dd></div>'
+    +'<div><dt>Span covered</dt><dd>'+fmtDur(n*S.interval)+'</dd></div>'
+    +'<div><dt>Temperature range</dt><dd>'+(valid.length?tmin.toFixed(2)+' to '+tmax.toFixed(2)+' °C':'none')+'</dd></div>'
+    +'</dl>';
+  if(S.buf.length)h+='<p class="note">One sample was still in the node\'s RAM when the tag came out. It stays underground with the node.</p>';
+  h+='<div id="charts"></div>';
+  if(bad.length)h+='<p class="note">Dashed red lines mark records that failed their check byte. They are dropped and the trace breaks there.</p>';
+  h+='<details><summary>All '+n+' decoded records</summary><div class="tablewrap"><table><thead><tr><th>#</th><th>Bytes</th><th>Temp °C</th><th>RH %</th><th>Moisture %</th><th>Check</th></tr></thead><tbody>';
+  rows.forEach(function(x){
+    h+='<tr'+(x.ok?'':' class="bad"')+'><td>'+(x.r+1)+'</td><td>'+x.hex+'</td>'+(x.ok?('<td>'+x.T.toFixed(2)+'</td><td>'+x.RH.toFixed(1)+'</td><td>'+x.V.toFixed(1)+'</td><td>ok</td>'):'<td>-</td><td>-</td><td>-</td><td>fail</td>')+'</tr>';
+  });
+  h+='</tbody></table></div></details>';
+  h+='<div class="btnrow"><button class="btn" id="again" type="button">Bury a fresh node</button></div>';
+  $('readoutBody').innerHTML=h;
+  $('again').addEventListener('click',reset);
+  watchCharts();drawCharts();
+}
+function nice(min,max,n){
+  if(max-min<1e-9){min-=0.5;max+=0.5;}
+  var raw=(max-min)/n,mag=Math.pow(10,Math.floor(Math.log10(raw))),nm=raw/mag;
+  var step=(nm<1.5?1:nm<3?2:nm<7?5:10)*mag;
+  var lo=Math.floor(min/step+1e-9)*step,hi=Math.ceil(max/step-1e-9)*step,ticks=[];
+  for(var v=lo;v<=hi+step/2;v+=step)ticks.push(+v.toFixed(6));
+  return {lo:lo,hi:hi,ticks:ticks,step:step};
+}
+function dec(step){return step<0.1?2:step<1?1:0;}
+var ro=null,watched=null;
+function watchCharts(){
+  var host=$('charts');
+  if(!host||typeof ResizeObserver==='undefined')return;
+  if(ro)ro.disconnect();
+  ro=new ResizeObserver(function(){drawCharts();});
+  ro.observe(host);watched=host;
+}
+function drawCharts(){
+  var host=$('charts'),d=R.data;
+  if(!host||!d||!d.valid.length){if(host)host.innerHTML='<p class="empty">No record passed its check, so there is nothing to plot.</p>';return;}
+  var W=Math.max(280,Math.floor(host.clientWidth)),ml=48,mr=12,H=96,top=24,gap=14,axisH=40;
+  var defs=[
+    {key:'T',label:'Temperature',unit:'°C',cls:'temp'},
+    {key:'RH',label:'Relative humidity',unit:'%RH',cls:'hum'},
+    {key:'V',label:'Soil moisture',unit:'% by volume',cls:'vwc'}
+  ];
+  var totalH=defs.length*(top+H+gap)-gap+axisH;
+  var tEnd=d.rows[d.rows.length-1].t,xs=nice(0,tEnd,W<420?4:6),xmax=xs.hi||1;
+  var px=function(t){return ml+t/xmax*(W-ml-mr);};
+  var svg='<svg width="'+W+'" height="'+totalH+'" viewBox="0 0 '+W+' '+totalH+'" role="img" aria-label="Temperature, humidity and moisture recorded by the tag, plotted against hours since burial">';
+  var lastY0=0;
+  defs.forEach(function(df,i){
+    var y0=i*(top+H+gap)+top;lastY0=y0;
+    var vals=d.valid.map(function(r){return r[df.key];});
+    var sc=nice(Math.min.apply(null,vals),Math.max.apply(null,vals),3);
+    var py=function(v){return y0+H-(v-sc.lo)/(sc.hi-sc.lo)*H;};
+    xs.ticks.forEach(function(t){var x=px(t);svg+='<line class="grid" x1="'+x+'" x2="'+x+'" y1="'+y0+'" y2="'+(y0+H)+'"/>';});
+    sc.ticks.forEach(function(v){
+      var y=py(v);
+      svg+='<line class="grid" x1="'+ml+'" x2="'+(W-mr)+'" y1="'+y+'" y2="'+y+'"/><text class="tick" x="'+(ml-6)+'" y="'+(y+4)+'" text-anchor="end">'+v.toFixed(dec(sc.step))+'</text>';
+    });
+    svg+='<line class="base" x1="'+ml+'" x2="'+(W-mr)+'" y1="'+(y0+H)+'" y2="'+(y0+H)+'"/>';
+    svg+='<text class="ptitle '+df.cls+'" x="'+ml+'" y="'+(y0-8)+'">'+df.label+' <tspan class="unit">'+df.unit+'</tspan></text>';
+    d.bad.forEach(function(r){var x=px(r.t);svg+='<line class="badline" x1="'+x+'" x2="'+x+'" y1="'+y0+'" y2="'+(y0+H)+'"/>';});
+    var segs=[],seg=[];
+    d.rows.forEach(function(r){
+      if(r.ok)seg.push([px(r.t),py(r[df.key])]);
+      else{if(seg.length)segs.push(seg);seg=[];}
+    });
+    if(seg.length)segs.push(seg);
+    segs.forEach(function(s){
+      var pts=s.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ');
+      if(s.length>1){
+        svg+='<polygon class="area '+df.cls+'" points="'+pts+' '+s[s.length-1][0].toFixed(1)+','+(y0+H)+' '+s[0][0].toFixed(1)+','+(y0+H)+'"/>';
+        svg+='<polyline class="line '+df.cls+'" points="'+pts+'"/>';
+      }else{
+        svg+='<circle class="dot '+df.cls+'" cx="'+s[0][0].toFixed(1)+'" cy="'+s[0][1].toFixed(1)+'" r="2.5"/>';
+      }
+    });
+    var last=d.valid[d.valid.length-1];
+    svg+='<circle class="end '+df.cls+'" cx="'+px(last.t).toFixed(1)+'" cy="'+py(last[df.key]).toFixed(1)+'" r="4"/>';
+  });
+  xs.ticks.forEach(function(t){svg+='<text class="tick" x="'+px(t)+'" y="'+(lastY0+H+15)+'" text-anchor="middle">'+t.toFixed(dec(xs.step))+'</text>';});
+  svg+='<text class="axt" x="'+(ml+(W-ml-mr)/2)+'" y="'+(lastY0+H+33)+'" text-anchor="middle">hours since burial</text>';
+  svg+='</svg>';
+  if(watched===host){host.innerHTML=svg;}
+}
+
+/* ---- wiring ---- */
+function busy(){return S.phase==='pulling';}
+$('soil').addEventListener('change',function(e){if(busy())return;P.soil=e.target.value;reset();});
+$('interval').addEventListener('change',function(e){if(busy())return;P.interval=parseFloat(e.target.value);reset();});
+$('depth').addEventListener('input',function(e){
+  if(busy())return;
+  P.depth=parseFloat(e.target.value);
+  $('depthOut').textContent=P.depth.toFixed(1)+' m';
+  reset();
+});
+$('run').addEventListener('click',function(){
+  if(S.phase==='logging'){S.phase='paused';stop();}
+  else if(S.phase==='paused'){S.phase='logging';start();}
+  updateUI();
+});
+$('snag').addEventListener('click',function(){
+  if(S.phase!=='logging'&&S.phase!=='paused')return;
+  S.snag=!S.snag;updateUI();
+});
+$('pull').addEventListener('click',pull);
+var rb=document.querySelectorAll('[data-rate]');
+for(var i=0;i<rb.length;i++){
+  rb[i].addEventListener('click',function(e){
+    P.rate=e.currentTarget.getAttribute('data-rate');
+    updateUI();
+    if(S.phase==='logging')start();
+  });
+}
+
+buildRuler();
+reset();
+})();
+</script>
+
+</body></html>
